@@ -33,7 +33,7 @@ export default function TopicsPage() {
     <div style={styles.container}>
       <header style={styles.header}>
         <div>
-          <Link href="/" style={styles.backLink}>← Return to Feed</Link>
+          <Link href="/home" style={styles.backLink}>← Return to Feed</Link>
           <h1 style={{ ...styles.title, display: 'flex', alignItems: 'center', gap: '8px' }}><Pin size={22} color={C.primaryText} /> Discussion Forum & Topics</h1>
           <p style={styles.subtitle}>Ask questions, start threads, and share knowledge with your team</p>
         </div>

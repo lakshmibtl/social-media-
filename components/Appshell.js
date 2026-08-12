@@ -21,7 +21,7 @@ const API_BASE = API_URL;
    (the same permissions you grant in Admin Portal → User Roles → Permissions)
 ===================================================================== */
 const NAV_ITEMS = [
-    { label: 'Home', href: '/', icon: Home, match: (p) => p === '/', permission: null },
+    { label: 'Home', href: '/home', icon: Home, match: (p) => p === '/home', permission: null },
     { label: 'My Profile', href: '/profile', icon: User, match: (p) => p.includes('profile'), permission: null },
     { label: 'People Directory', href: '/users', icon: Users, match: (p) => p.includes('people'), permission: 'access user profiles' },
     { label: 'Communities', href: '/groups', icon: UsersRound, match: (p) => p.includes('groups'), permission: 'access group overview' },
@@ -36,7 +36,7 @@ const NAV_ITEMS = [
 ];
 
 const BOTTOM_NAV_ITEMS = [
-    { label: 'Home', href: '/', icon: Home, match: (p) => p === '/', permission: null },
+    { label: 'Home', href: '/home', icon: Home, match: (p) => p === '/home', permission: null },
     { label: 'Profile', href: '/profile', icon: User, match: (p) => p.includes('profile') && !p.includes('users'), permission: null },
     { label: 'Messages', href: '/messages', icon: MessageSquare, match: (p) => p.includes('messages'), permission: 'create private_message entities' },
     { label: 'Groups', href: '/groups', icon: UsersRound, match: (p) => p.includes('groups'), permission: 'access group overview' },
@@ -515,7 +515,7 @@ export default function AppShell({ children }) {
         } else if (type.includes('content_reported')) {
             router.push('/admin');
         } else {
-            router.push('/');
+            router.push('/home');
         }
         setShowNotifs(false);
     };

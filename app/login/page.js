@@ -143,7 +143,7 @@ export default function LoginPage() {
           localStorage.setItem('openserver_user', JSON.stringify({ ...userObj, data }));
         }
         setMessage({ type: 'success', text: `Authenticated with Database as ${currentIdentifier}! Redirecting...` });
-        setTimeout(() => router.push('/'), 1200);
+        setTimeout(() => router.push('/home'), 1200);
       } else {
         const errJson = await res.json().catch(() => null);
         let errorMsg = 'Database rejected login credentials.';
@@ -167,14 +167,14 @@ export default function LoginPage() {
             localStorage.setItem('openserver_user', JSON.stringify({ ...userObj, role: matchedUser?.role || (isAdminLogin ? 'Administrator' : 'Employee') }));
           }
           setMessage({ type: 'success', text: `Login Successful as ${currentIdentifier}! Redirecting to Hub...` });
-          router.push('/');
+          router.push('/home');
         } else if (isRegister) {
           saveToDirectory(registerUsername, email);
           if (typeof window !== 'undefined') {
             localStorage.setItem('openserver_user', JSON.stringify({ ...userObj, role: 'Employee' }));
           }
           setMessage({ type: 'success', text: `Account created as ${registerUsername}! Redirecting...` });
-          router.push('/');
+          router.push('/home');
         } else {
           setMessage({ type: 'error', text: `Login Failed: Invalid Username or Password.` });
         }
@@ -194,7 +194,7 @@ export default function LoginPage() {
           localStorage.setItem('openserver_user', JSON.stringify({ ...userObj, role: matchedUser?.role || (isRegister ? 'Employee' : (isAdminLogin ? 'Administrator' : 'Employee')) }));
         }
         setMessage({ type: 'success', text: `Login Successful as ${currentIdentifier}! Redirecting to Hub...` });
-        router.push('/');
+        router.push('/home');
       } else if (isRegister) {
         // New registration — allow
         saveToDirectory(currentIdentifier, email);
@@ -202,7 +202,7 @@ export default function LoginPage() {
           localStorage.setItem('openserver_user', JSON.stringify({ ...userObj, role: 'Employee' }));
         }
         setMessage({ type: 'success', text: `Account created as ${currentIdentifier}! Redirecting...` });
-        router.push('/');
+        router.push('/home');
       } else {
         setMessage({ type: 'error', text: `Login Failed: Invalid Username or Password.` });
       }
@@ -235,7 +235,7 @@ export default function LoginPage() {
           }}>
             <span>{message.text}</span>
             {message.text.includes('Redirecting') && (
-              <Link href="/" style={{
+              <Link href="/home" style={{
                 backgroundColor: '#059669',
                 color: '#ffffff',
                 padding: '6px 12px',

@@ -68,7 +68,7 @@ export default function CommunityPage({ params }) {
   const { isMobile } = useResponsive();
 
   const [postText, setPostText] = useState('');
-  const [selectedFile, setSelectedFile] = useState(null);
+  const [selectedFiles, setSelectedFiles] = useState([]);
 
   const [posts, setPosts] = useState([]);
   const [imagesMap, setImagesMap] = useState({});
@@ -309,42 +309,44 @@ export default function CommunityPage({ params }) {
 
   async function handleCreatePost(e) {
     e.preventDefault();
-    if (!postText.trim() && !selectedFile) return;
+    if (!postText.trim() && selectedFiles.length === 0) return;
 
     setSubmitting(true);
     try {
       const csrfToken = await getCsrfToken();
       const typeOfGroup = groupInfo ? groupInfo.groupType : 'public_group';
 
-      let fileId = null;
+      const fileIds = [];
 
-      // Phase 3: Image Upload Logic
-      if (selectedFile) {
-        // Step 1: Upload the binary file
-        const fileRes = await fetch(`${BASE_URL}/jsonapi/post/photo/field_post_image`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: {
-            'Accept': 'application/vnd.api+json',
-            'Content-Type': 'application/octet-stream',
-            'Content-Disposition': `file; filename="${encodeURIComponent(selectedFile.name)}"`,
-            'X-CSRF-Token': csrfToken
-          },
-          body: selectedFile
-        });
+      // Phase 3: Image Upload Logic (multi-file)
+      if (selectedFiles.length > 0) {
+        for (const file of selectedFiles) {
+          // Step 1: Upload the binary file
+          const fileRes = await fetch(`${BASE_URL}/jsonapi/post/photo/field_post_image`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+              'Accept': 'application/vnd.api+json',
+              'Content-Type': 'application/octet-stream',
+              'Content-Disposition': `file; filename="${encodeURIComponent(file.name)}"`,
+              'X-CSRF-Token': csrfToken
+            },
+            body: file
+          });
 
-        if (!fileRes.ok) {
-          const errJson = await fileRes.json().catch(() => null);
-          throw new Error(`File Upload Error: ${errJson?.errors?.[0]?.detail || 'Access Denied or Server Error'}`);
+          if (!fileRes.ok) {
+            const errJson = await fileRes.json().catch(() => null);
+            throw new Error(`File Upload Error: ${errJson?.errors?.[0]?.detail || 'Access Denied or Server Error'}`);
+          }
+
+          const fileData = await fileRes.json();
+          if (fileData.data?.id) fileIds.push(fileData.data.id);
         }
-
-        const fileData = await fileRes.json();
-        fileId = fileData.data.id;
       }
 
-      const isPhotoPost = !!fileId;
+      const isPhotoPost = fileIds.length > 0;
 
-      // Step 2: Create the post and attach the uploaded image
+      // Step 2: Create the post and attach the uploaded images
       const body = {
         data: {
           type: isPhotoPost ? 'post--photo' : 'post--post',
@@ -360,7 +362,7 @@ export default function CommunityPage({ params }) {
 
       if (isPhotoPost) {
         body.data.relationships.field_post_image = {
-          data: [{ type: 'file--file', id: fileId }]
+          data: fileIds.map(id => ({ type: 'file--file', id }))
         };
       }
 
@@ -374,7 +376,7 @@ export default function CommunityPage({ params }) {
 
       if (res.ok) {
         setPostText('');
-        setSelectedFile(null);
+        setSelectedFiles([]);
         showToast('Post published successfully');
         fetchPosts();
       } else {
@@ -606,14 +608,18 @@ export default function CommunityPage({ params }) {
                   />
 
                   {/* Image Preview Area */}
-                  {selectedFile && (
-                    <div style={G.previewContainer}>
-                      <div style={G.previewName}>
-                        <ImageIcon size={16} /> {selectedFile.name}
-                      </div>
-                      <button type="button" onClick={() => setSelectedFile(null)} style={G.previewRemove}>
-                        <Trash2 size={15} />
-                      </button>
+                  {selectedFiles.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '8px' }}>
+                      {selectedFiles.map((file, idx) => (
+                        <div key={idx} style={{ ...G.previewContainer, width: 'auto', paddingRight: '8px' }}>
+                          <div style={G.previewName}>
+                            <ImageIcon size={16} /> {file.name}
+                          </div>
+                          <button type="button" onClick={() => setSelectedFiles(prev => prev.filter((_, i) => i !== idx))} style={G.previewRemove}>
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -626,13 +632,14 @@ export default function CommunityPage({ params }) {
                   id="image-upload"
                   style={{ display: 'none' }}
                   accept="image/*"
-                  onChange={(e) => setSelectedFile(e.target.files[0])}
+                  multiple
+                  onChange={(e) => { const files = Array.from(e.target.files || []); if (files.length) setSelectedFiles(prev => [...prev, ...files]); e.target.value = ''; }}
                 />
                 <button type="button" onClick={() => document.getElementById('image-upload').click()} className="btn-action-light" style={G.attachBtn}>
-                  <ImageIcon size={16} /> Photo/Video
+                  <ImageIcon size={16} /> Photo/Video (multi)
                 </button>
 
-                <button onClick={handleCreatePost} disabled={submitting || (!postText.trim() && !selectedFile)} className="btn-glow" style={G.postBtn}>
+                <button onClick={handleCreatePost} disabled={submitting || (!postText.trim() && selectedFiles.length === 0)} className="btn-glow" style={G.postBtn}>
                   {submitting ? 'Posting...' : <><Send size={16} /> Post</>}
                 </button>
               </div>
@@ -658,10 +665,10 @@ export default function CommunityPage({ params }) {
                   const content = post.attributes?.field_post?.value?.replace(/(<([^>]+)>)/gi, "") || 'No content';
                   const isLiked = likedPosts.has(post.id);
 
-                  // Check if there is an attached image
+                  // Check if there are attached images
                   const imageRelation = post.relationships?.field_post_image?.data;
-                  const imageFileId = Array.isArray(imageRelation) ? imageRelation[0]?.id : imageRelation?.id;
-                  const imageUrl = imageFileId ? imagesMap[imageFileId] : null;
+                  const imageRels = Array.isArray(imageRelation) ? imageRelation : (imageRelation ? [imageRelation] : []);
+                  const imageUrls = imageRels.map(r => imagesMap[r?.id]).filter(Boolean);
 
                   return (
                     <div
@@ -699,10 +706,14 @@ export default function CommunityPage({ params }) {
                       {/* Post Body */}
                       {content.trim() && <p style={G.postText}>{content}</p>}
 
-                      {/* Render Image Attachment */}
-                      {imageUrl && (
-                        <div style={{ ...G.postImageWrap, position: 'relative', cursor: 'pointer' }}>
-                          <AuthenticatedImage url={imageUrl} alt="Post Attachment" style={G.postImage} />
+                      {/* Render Image Attachments */}
+                      {imageUrls.length > 0 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', position: 'relative' }}>
+                          {imageUrls.map((img, idx) => (
+                            <div key={idx} style={{ ...G.postImageWrap, position: 'relative', cursor: 'pointer', flex: imageUrls.length > 1 ? '1 1 45%' : '1 1 100%', minWidth: imageUrls.length > 1 ? '220px' : '100%', marginBottom: 0 }}>
+                              <AuthenticatedImage url={img} alt="Post Attachment" style={{ ...G.postImage, height: imageUrls.length > 1 ? '220px' : 'auto', objectFit: imageUrls.length > 1 ? 'cover' : 'contain' }} />
+                            </div>
+                          ))}
                           {likedAnimationPostId === post.id && (
                             <div style={{
                               position: 'absolute',

@@ -148,7 +148,7 @@ function ProfileContent() {
   const [posts, setPosts] = useState([]);
   const [postsLoading, setPostsLoading] = useState(false);
   const [newPostText, setNewPostText] = useState('');
-  const [selectedFile, setSelectedFile] = useState(null);
+  const [selectedFiles, setSelectedFiles] = useState([]);
   const [postingLoading, setPostingLoading] = useState(false);
   const [myGroups, setMyGroups] = useState([]);
   const [allGroups, setAllGroups] = useState([]);
@@ -644,12 +644,14 @@ function ProfileContent() {
             const uid = p.relationships?.user_id?.data?.id;
             const authorName = localPost?.author || (uid ? usersMap[uid] : (p.attributes?.field_author_name || 'Community Member'));
 
-            // ✅ Resolve the REAL image (no more demo Unsplash image)
+            // ✅ Resolve the REAL images (no more demo Unsplash image)
             let postImg = null;
+            let postImgs = [];
             if (p.type === 'post--photo') {
               const fileRel = p.relationships?.field_post_image?.data;
-              const fileId = Array.isArray(fileRel) ? fileRel[0]?.id : fileRel?.id;
-              if (fileId && filesMap[fileId]) postImg = filesMap[fileId];
+              const fileIds = Array.isArray(fileRel) ? fileRel.map(r => r?.id).filter(Boolean) : (fileRel?.id ? [fileRel.id] : []);
+              postImgs = fileIds.map(fid => filesMap[fid]).filter(Boolean);
+              postImg = postImgs[0] || null;
             }
 
             return {
@@ -658,7 +660,8 @@ function ProfileContent() {
               created: p.attributes?.created,
               author: authorName,
               userId: uid,
-              image: localPost?.image || postImg
+              image: localPost?.image || postImg,
+              images: (localPost?.images?.length ? localPost.images : postImgs)
             };
           })];
         }
@@ -685,7 +688,8 @@ function ProfileContent() {
                 created: createdTime,
                 author: lp.author,
                 userId: lp.userId || null,
-                image: lp.image || null
+                image: lp.image || null,
+                images: lp.images?.length ? lp.images : (lp.image ? [lp.image] : [])
               });
             }
           });
@@ -724,7 +728,8 @@ function ProfileContent() {
             text: p.content || '',
             created: p.created || new Date().toISOString(),
             author: p.author,
-            image: p.image || null
+            image: p.image || null,
+            images: p.images?.length ? p.images : (p.image ? [p.image] : [])
           }));
         setPosts(localOnly);
       } catch (err) { setPosts([]); }
@@ -735,19 +740,22 @@ function ProfileContent() {
   const handleCreatePost = async (e) => {
     e.preventDefault();
     const postText = newPostText.trim();
-    if (!postText && !selectedFile) return;
+    if (!postText && selectedFiles.length === 0) return;
     setPostingLoading(true);
 
     const tempId = 'p-' + Date.now();
 
-    let localImage = null;
-    if (selectedFile) {
-      localImage = await new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = (ev) => resolve(ev.target.result);
-        reader.onerror = () => resolve(null);
-        reader.readAsDataURL(selectedFile);
-      });
+    const localImages = [];
+    if (selectedFiles.length > 0) {
+      for (const file of selectedFiles) {
+        const dataUrl = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (ev) => resolve(ev.target.result);
+          reader.onerror = () => resolve(null);
+          reader.readAsDataURL(file);
+        });
+        if (dataUrl) localImages.push(dataUrl);
+      }
     }
 
     // ✅ Optimistic local save FIRST so the post shows on the profile (and
@@ -760,7 +768,8 @@ function ProfileContent() {
       initials: (activeUsername || '?').substring(0, 2).toUpperCase(),
       time: 'Just now',
       content: postText,
-      image: localImage,
+      image: localImages[0] || null,
+      images: localImages,
       userReaction: null,
       visibility: '1',
       likesCount: 0, dislikesCount: 0, lovesCount: 0, commentsCount: 0, comments: []
@@ -774,33 +783,35 @@ function ProfileContent() {
     } catch (e) { }
 
     setPosts((prev) => [localPost, ...prev]);
-    setNewPostText(''); setSelectedFile(null); setShowComposer(false);
+    setNewPostText(''); setSelectedFiles([]); setShowComposer(false);
     showToast('Post shared!');
     recordActivityLog(`edit ${name} published a new post`);
 
     try {
       const token = await getCsrfToken();
-      let fileId = null;
+      const fileIds = [];
 
-      if (selectedFile) {
-        const fileRes = await fetch(`${API}/post/photo/field_post_image`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: {
-            'Accept': 'application/vnd.api+json',
-            'Content-Type': 'application/octet-stream',
-            'Content-Disposition': `file; filename="${encodeURIComponent(selectedFile.name)}"`,
-            'X-CSRF-Token': token
-          },
-          body: selectedFile
-        });
-        if (fileRes.ok) {
-          const fileData = await fileRes.json();
-          fileId = fileData.data.id;
+      if (selectedFiles.length > 0) {
+        for (const file of selectedFiles) {
+          const fileRes = await fetch(`${API}/post/photo/field_post_image`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+              'Accept': 'application/vnd.api+json',
+              'Content-Type': 'application/octet-stream',
+              'Content-Disposition': `file; filename="${encodeURIComponent(file.name)}"`,
+              'X-CSRF-Token': token
+            },
+            body: file
+          });
+          if (fileRes.ok) {
+            const fileData = await fileRes.json();
+            if (fileData.data?.id) fileIds.push(fileData.data.id);
+          }
         }
       }
 
-      const isPhoto = !!fileId;
+      const isPhoto = fileIds.length > 0;
       const body = {
         data: {
           type: isPhoto ? 'post--photo' : 'post--post',
@@ -813,7 +824,7 @@ function ProfileContent() {
 
       if (isPhoto) {
         body.data.relationships = {
-          field_post_image: { data: [{ type: 'file--file', id: fileId }] }
+          field_post_image: { data: fileIds.map(id => ({ type: 'file--file', id })) }
         };
       }
 
@@ -1098,14 +1109,28 @@ function ProfileContent() {
                             style={{ flex: 1, border: 'none', outline: 'none', fontSize: '16px', backgroundColor: 'transparent', color: C.text, resize: 'none', minHeight: '60px', fontFamily: 'inherit', paddingTop: '12px' }}
                           />
                         </div>
-                        {selectedFile && <div style={{ fontSize: '13px', color: C.primary, paddingLeft: '64px', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}><Camera size={16} /> Attached: {selectedFile.name}</div>}
+                        {selectedFiles.length > 0 && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', paddingLeft: '64px' }}>
+                            {selectedFiles.map((file, idx) => (
+                              <div key={idx} style={{ fontSize: '13px', color: C.primary, display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600, backgroundColor: C.primarySoft, borderRadius: '6px', padding: '4px 8px' }}>
+                                <Camera size={14} /> {file.name}
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedFiles(prev => prev.filter((_, i) => i !== idx))}
+                                  style={{ border: 'none', background: 'transparent', color: '#ef4444', cursor: 'pointer', fontSize: '14px', fontWeight: 800, lineHeight: 1 }}
+                                  aria-label="Remove file"
+                                >×</button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingLeft: '64px', borderTop: `1px solid ${C.borderLight}`, paddingTop: '16px' }}>
                           <label style={{ fontSize: '18px', cursor: 'pointer', margin: 0, display: 'inline-flex', alignItems: 'center', gap: '8px', color: C.muted, fontWeight: 700 }}>
                             <span style={{ padding: '10px', borderRadius: '50%', backgroundColor: C.primarySoft, color: C.primary, display: 'flex' }}><ImageIcon size={18} /></span>
-                            <span style={{ fontSize: '14px' }}>Attach Media</span>
-                            <input type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => setSelectedFile(e.target.files[0])} />
+                            <span style={{ fontSize: '14px' }}>Attach Media (multi)</span>
+                            <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={(e) => { const files = Array.from(e.target.files || []); if (files.length) setSelectedFiles(prev => [...prev, ...files]); e.target.value = ''; }} />
                           </label>
-                          <button type="submit" disabled={postingLoading || (!newPostText.trim() && !selectedFile)} style={{ ...btnBlue, padding: '12px 24px', opacity: (postingLoading || (!newPostText.trim() && !selectedFile)) ? 0.6 : 1, fontSize: '14px', display: 'flex', gap: '8px', alignItems: 'center' }}>
+                          <button type="submit" disabled={postingLoading || (!newPostText.trim() && selectedFiles.length === 0)} style={{ ...btnBlue, padding: '12px 24px', opacity: (postingLoading || (!newPostText.trim() && selectedFiles.length === 0)) ? 0.6 : 1, fontSize: '14px', display: 'flex', gap: '8px', alignItems: 'center' }}>
                             {postingLoading ? 'Publishing...' : <><Atom size={16} /> Publish Post</>}
                           </button>
                         </div>
@@ -1123,7 +1148,7 @@ function ProfileContent() {
                       {posts.map((p, i) => (
                         <div key={p.id} style={{
                           aspectRatio: '1 / 1',
-                          background: p.image ? `url(${p.image}) center/cover no-repeat` : GRADIENTS[i % GRADIENTS.length],
+                          background: (p.images?.[0] || p.image) ? `url(${p.images?.[0] || p.image}) center/cover no-repeat` : GRADIENTS[i % GRADIENTS.length],
                           borderRadius: '4px',
                           position: 'relative',
                           overflow: 'hidden',
@@ -1133,7 +1158,7 @@ function ProfileContent() {
                           padding: '18px',
                           cursor: 'pointer'
                         }}>
-                          {!p.image && <p style={{ color: '#fff', fontSize: '13px', fontWeight: 600, textAlign: 'center', margin: 0, display: '-webkit-box', WebkitLineClamp: 6, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{p.text}</p>}
+                          {!(p.images?.[0] || p.image) && <p style={{ color: '#fff', fontSize: '13px', fontWeight: 600, textAlign: 'center', margin: 0, display: '-webkit-box', WebkitLineClamp: 6, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{p.text}</p>}
                           {p.created && <span style={{ position: 'absolute', bottom: '8px', right: '10px', color: '#fff', fontSize: '10px', fontWeight: 700, textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}>{new Date(p.created).toLocaleDateString()}</span>}
                         </div>
                       ))}

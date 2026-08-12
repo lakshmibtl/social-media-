@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import useResponsive from '../../lib/useResponsive';
 import { C, G, P, S } from '../../lib/theme';
-import { ArrowLeft, Camera, FileText, FolderUp, Upload, Zap, Rocket, Image as ImageIcon } from 'lucide-react';
+import { ArrowLeft, Camera, FileText, FolderUp, Upload, Zap, Rocket, Plus, Image as ImageIcon } from 'lucide-react';
 import { API_URL } from '../../lib/config';
 
 function getCurrentUserName() {
@@ -25,7 +25,8 @@ export default function PostsPage() {
   const [newPostText, setNewPostText] = useState('');
   const [postType, setPostType] = useState('photo'); // 'photo' or 'text'
   const [imageUrl, setImageUrl] = useState('');
-  const [selectedFileId, setSelectedFileId] = useState(null);
+  const [imageUrls, setImageUrls] = useState([]);
+  const [selectedFileIds, setSelectedFileIds] = useState([]);
   const [filesList, setFilesList] = useState([]);
   const [uploadingFile, setUploadingFile] = useState(false);
   const [uploadStatus, setUploadStatus] = useState('');
@@ -34,66 +35,87 @@ export default function PostsPage() {
   const { isMobile } = useResponsive();
 
   const handleFileUploadToDrupal = async (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(event.target.files || []);
+    if (files.length === 0) return;
 
     setUploadingFile(true);
-    setUploadStatus(`Uploading ${file.name} via POST ${API_URL}/jsonapi/file/file...`);
+    setUploadStatus(`Uploading ${files.length} file(s) via POST ${API_URL}/jsonapi/file/file...`);
 
     try {
-      const res = await fetch(`${API_URL}/jsonapi/file/file`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/octet-stream',
-          'Accept': 'application/vnd.api+json',
-          'Content-Disposition': `file; filename="${file.name}"`
-        },
-        body: file
-      });
+      const uploaded = [];
+      for (const file of files) {
+        const res = await fetch(`${API_URL}/jsonapi/file/file`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            'Accept': 'application/vnd.api+json',
+            'Content-Disposition': `file; filename="${file.name}"`
+          },
+          body: file
+        });
 
-      if (res.ok) {
-        const json = await res.json();
-        const createdData = json.data;
-        const fileUrl = createdData?.attributes?.uri?.url
-          ? (createdData.attributes.uri.url.startsWith('http') ? createdData.attributes.uri.url : `${API_URL}${createdData.attributes.uri.url}`)
-          : URL.createObjectURL(file);
+        if (res.ok) {
+          const json = await res.json();
+          const createdData = json.data;
+          const fileUrl = createdData?.attributes?.uri?.url
+            ? (createdData.attributes.uri.url.startsWith('http') ? createdData.attributes.uri.url : `${API_URL}${createdData.attributes.uri.url}`)
+            : URL.createObjectURL(file);
 
-        const newFileId = createdData?.id || `file-${Date.now()}`;
-        setImageUrl(fileUrl);
-        setSelectedFileId(newFileId);
-        setUploadStatus(`Successfully POSTed ${file.name} to /jsonapi/file/file!`);
+          const newFileId = createdData?.id || `file-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          setImageUrls((prev) => [...prev, fileUrl]);
+          setSelectedFileIds((prev) => [...prev, newFileId]);
 
-        setFilesList((prev) => [
-          {
+          uploaded.push({
             id: newFileId,
             filename: file.name,
             mime: file.type || 'image/png',
             size: `${(file.size / 1024).toFixed(1)} KB`,
             url: fileUrl
-          },
-          ...prev
-        ]);
-      } else {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          setImageUrl(e.target.result);
-        };
-        reader.readAsDataURL(file);
-        const fallbackId = `file-${Date.now()}`;
-        setSelectedFileId(fallbackId);
-        setUploadStatus(`Loaded "${file.name}" into permanent database storage!`);
+          });
+        } else {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            setImageUrls((prev) => [...prev, e.target.result]);
+          };
+          reader.readAsDataURL(file);
+          const fallbackId = `file-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          setSelectedFileIds((prev) => [...prev, fallbackId]);
+        }
+      }
+      setUploadStatus(`Successfully processed ${uploaded.length} file(s)!`);
+      if (uploaded.length > 0) {
+        setFilesList((prev) => [...uploaded, ...prev]);
       }
     } catch (err) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        setImageUrl(e.target.result);
-      };
-      reader.readAsDataURL(file);
-      setSelectedFileId(`file-${Date.now()}`);
-      setUploadStatus(`Loaded "${file.name}" into permanent database storage!`);
+      files.forEach((file) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          setImageUrls((prev) => [...prev, e.target.result]);
+        };
+        reader.readAsDataURL(file);
+        setSelectedFileIds((prev) => [...prev, `file-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`]);
+      });
+      setUploadStatus(`Loaded ${files.length} file(s) into local preview.`);
     } finally {
       setUploadingFile(false);
+      event.target.value = '';
     }
+  };
+
+  const handleAddImageUrl = () => {
+    const url = imageUrl.trim();
+    if (!url) return;
+    setImageUrls((prev) => [...prev, url]);
+    setImageUrl('');
+  };
+
+  const handleAddPresetImage = (url) => {
+    setImageUrls((prev) => [...prev, url]);
+  };
+
+  const handleRemoveImage = (idx) => {
+    setImageUrls((prev) => prev.filter((_, i) => i !== idx));
+    setSelectedFileIds((prev) => prev.filter((_, i) => i !== idx));
   };
 
   useEffect(() => {
@@ -132,32 +154,37 @@ export default function PostsPage() {
 
           if (photoJson.data && photoJson.data.length > 0) {
             const parsedPhotoPosts = photoJson.data.map((item) => {
-              // Extract image reference from relationships or included file entities
-              let imgUrl = null;
-              let fileId = null;
+              // Extract image references from relationships or included file entities
+              const imgUrls = [];
+              let fileIds = [];
               const imgRel = item.relationships?.field_post_image?.data || item.relationships?.field_media_image?.data;
-              if (imgRel) {
-                fileId = imgRel.id;
-                const matchedInc = included.find((inc) => inc.id === imgRel.id);
+              const rels = Array.isArray(imgRel) ? imgRel : (imgRel ? [imgRel] : []);
+              rels.forEach((rel) => {
+                if (!rel?.id) return;
+                const matchedInc = included.find((inc) => inc.id === rel.id);
+                let url = null;
                 if (matchedInc?.attributes?.uri?.url) {
-                  imgUrl = matchedInc.attributes.uri.url.startsWith('http')
+                  url = matchedInc.attributes.uri.url.startsWith('http')
                     ? matchedInc.attributes.uri.url
                     : `${API_URL}${matchedInc.attributes.uri.url}`;
                 } else if (matchedInc?.attributes?.url) {
-                  imgUrl = matchedInc.attributes.url;
+                  url = matchedInc.attributes.url;
                 }
-              }
+                if (url) imgUrls.push(url);
+                fileIds.push(rel.id);
+              });
 
               return {
                 id: item.id,
                 type: 'photo',
                 endpoint: '/jsonapi/post/photo',
-                fileId: fileId,
+                fileId: fileIds[0] || null,
                 attributes: {
                   field_post: item.attributes?.field_post || item.attributes?.body || { value: 'Shared a community photo update' },
                   created: item.attributes?.created || new Date().toISOString()
                 },
-                image: imgUrl || 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=1000&auto=format&fit=crop&q=80'
+                images: imgUrls,
+                image: imgUrls[0] || 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=1000&auto=format&fit=crop&q=80'
               };
             });
             combined.push(...parsedPhotoPosts);
@@ -247,9 +274,10 @@ export default function PostsPage() {
 
     const isPhoto = postType === 'photo';
     const targetEndpoint = isPhoto ? '/jsonapi/post/photo' : '/jsonapi/post/post';
-    const selectedImage = isPhoto
-      ? imageUrl.trim() || 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=1000&auto=format&fit=crop&q=80'
-      : null;
+    const selectedImages = isPhoto && imageUrls.length > 0
+      ? imageUrls.filter(Boolean)
+      : (isPhoto && imageUrl.trim() ? [imageUrl.trim()] : []);
+    const selectedImage = selectedImages[0] || (isPhoto ? 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=1000&auto=format&fit=crop&q=80' : null);
 
     // Construct full Drupal JSON:API payload including relationships
     const payload = {
@@ -262,13 +290,10 @@ export default function PostsPage() {
       }
     };
 
-    if (isPhoto && selectedFileId) {
+    if (isPhoto && selectedFileIds.length > 0) {
       payload.data.relationships = {
         field_post_image: {
-          data: {
-            type: 'file--file',
-            id: selectedFileId
-          }
+          data: selectedFileIds.map(id => ({ type: 'file--file', id }))
         }
       };
     }
@@ -314,6 +339,7 @@ export default function PostsPage() {
         created: new Date().toISOString()
       },
       image: selectedImage,
+      images: selectedImages,
       author: authorName,
       avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
       statusNotice: responseNotice
@@ -336,14 +362,16 @@ export default function PostsPage() {
           content: newPostText,
           created: newCreatedPost.attributes.created,
           author: authorName,
-          image: selectedImage
+          image: selectedImage,
+          images: selectedImages
         });
         localStorage.setItem('openserver_posts_v2', JSON.stringify(savedPosts));
       }
     } catch (e) { }
     setNewPostText('');
     setImageUrl('');
-    setSelectedFileId(null);
+    setImageUrls([]);
+    setSelectedFileIds([]);
   };
 
   async function recordActivityLog(user, action, target, icon = 'zap', postImage = null) {
@@ -402,7 +430,7 @@ export default function PostsPage() {
       <header style={styles.header}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
           <div>
-            <Link href="/" style={styles.backLink}>
+            <Link href="/home" style={styles.backLink}>
               <span style={styles.iconText}>
                 <ArrowLeft size={16} />
                 Master Dashboard
@@ -485,11 +513,12 @@ export default function PostsPage() {
                   }}>
                     <span style={styles.iconText}>
                       <Upload size={16} />
-                      Upload Binary File (POST /jsonapi/file/file)
+                      Upload Binary Files (POST /jsonapi/file/file) — Multi-select
                     </span>
                     <input
                       type="file"
                       accept="image/*"
+                      multiple
                       onChange={handleFileUploadToDrupal}
                       style={{ display: 'none' }}
                     />
@@ -515,12 +544,17 @@ export default function PostsPage() {
                         key={f.id}
                         type="button"
                         onClick={() => {
-                          setImageUrl(f.url);
-                          setSelectedFileId(f.id);
+                          if (selectedFileIds.includes(f.id)) {
+                            setSelectedFileIds((prev) => prev.filter((id) => id !== f.id));
+                            setImageUrls((prev) => prev.filter((url) => url !== f.url));
+                          } else {
+                            setSelectedFileIds((prev) => [...prev, f.id]);
+                            setImageUrls((prev) => [...prev, f.url]);
+                          }
                         }}
                         style={{
-                          backgroundColor: selectedFileId === f.id ? G.brand : '#ffffff',
-                          color: selectedFileId === f.id ? '#ffffff' : C.primary,
+                          backgroundColor: selectedFileIds.includes(f.id) ? G.brand : '#ffffff',
+                          color: selectedFileIds.includes(f.id) ? '#ffffff' : C.primary,
                           border: `1px solid ${C.border}`,
                           borderRadius: '6px',
                           padding: '6px 10px',
@@ -539,16 +573,21 @@ export default function PostsPage() {
                 </div>
               )}
 
-              <input
-                type="text"
-                placeholder="Enter image URL or select from File API above..."
-                value={imageUrl}
-                onChange={(e) => {
-                  setImageUrl(e.target.value);
-                  setSelectedFileId(null);
-                }}
-                style={styles.input}
-              />
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  type="text"
+                  placeholder="Enter image URL and click Add..."
+                  value={imageUrl}
+                  onChange={(e) => setImageUrl(e.target.value)}
+                  style={styles.input}
+                />
+                <button type="button" onClick={handleAddImageUrl} style={styles.presetBtn}>
+                  <span style={styles.iconText}>
+                    <Plus size={14} />
+                    Add
+                  </span>
+                </button>
+              </div>
 
               <div style={styles.presetsRow}>
                 <span style={{ fontSize: '12px', color: C.muted, fontWeight: '600' }}>Sample Photos:</span>
@@ -556,10 +595,7 @@ export default function PostsPage() {
                   <button
                     key={idx}
                     type="button"
-                    onClick={() => {
-                      setImageUrl(preset.url);
-                      setSelectedFileId(null);
-                    }}
+                    onClick={() => handleAddPresetImage(preset.url)}
                     style={styles.presetBtn}
                   >
                     <span style={styles.iconText}>
@@ -570,17 +606,34 @@ export default function PostsPage() {
                 ))}
               </div>
 
-              {imageUrl && (
+              {imageUrls.length > 0 && (
                 <div style={styles.previewBox}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
-                    <span style={styles.previewLabel}>Photo Preview:</span>
-                    {selectedFileId && (
+                    <span style={styles.previewLabel}>Photo Previews ({imageUrls.length}):</span>
+                    {selectedFileIds.length > 0 && (
                       <span style={{ fontSize: '11px', backgroundColor: C.primarySoft, color: C.primary, padding: '2px 8px', borderRadius: '4px', fontWeight: '700' }}>
-                        Linked File ID: {selectedFileId}
+                        {selectedFileIds.length} Linked File ID(s)
                       </span>
                     )}
                   </div>
-                  <img src={imageUrl} alt="Preview" style={styles.previewImg} />
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                    {imageUrls.map((url, idx) => (
+                      <div key={idx} style={{ position: 'relative' }}>
+                        <img src={url} alt="Preview" style={{ ...styles.previewImg, maxWidth: '150px', height: '110px', objectFit: 'cover' }} />
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveImage(idx)}
+                          style={{
+                            position: 'absolute', top: '-8px', right: '-8px', width: '22px', height: '22px',
+                            borderRadius: '50%', border: 'none', backgroundColor: '#ef4444', color: '#fff',
+                            fontSize: '13px', fontWeight: 800, cursor: 'pointer', lineHeight: '1',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center'
+                          }}
+                          aria-label="Remove image"
+                        >×</button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -659,10 +712,14 @@ export default function PostsPage() {
                   </div>
                 )}
 
-                {/* Render the Photo inside the Post if present or if post.type is photo */}
-                {post.image && (
-                  <div style={styles.photoContainer}>
-                    <img src={post.image} alt="Post Photo" style={styles.photoImage} />
+                {/* Render the Photos inside the Post if present or if post.type is photo */}
+                {(post.images?.length ? post.images : post.image ? [post.image] : []).length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                    {(post.images?.length ? post.images : post.image ? [post.image] : []).map((img, idx) => (
+                      <div key={idx} style={{ ...styles.photoContainer, flex: post.images?.length > 1 ? '1 1 45%' : '1 1 100%', minWidth: post.images?.length > 1 ? '220px' : '100%', marginBottom: 0 }}>
+                        <img src={img} alt="Post Photo" style={{ ...styles.photoImage, height: post.images?.length > 1 ? '220px' : 'auto', objectFit: post.images?.length > 1 ? 'cover' : 'contain' }} />
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
